@@ -1,100 +1,151 @@
-// تهيئة المشغل مع إعدادات HLS
+// تهيئة المشغل مع إعدادات متقدمة
 const player = videojs('my-video', {
     html5: {
         hls: {
             overrideNative: true,
-            withCredentials: false
+            withCredentials: false,
+            debug: true // تفعيل وضع التصحيح
         }
     },
-    techOrder: ['html5']
+    techOrder: ['html5'],
+    autoplay: false,
+    controls: true
 });
 
 // إعدادات المستخدم
 let savedSettings = JSON.parse(localStorage.getItem('xtreamSettings'));
+let currentHls = null; // متغير لتتبع مثيل HLS
 
 // تحميل الإعدادات عند البدء
-window.onload = () => {
+window.onload = async () => {
     if (savedSettings) {
         document.getElementById('mainContent').style.display = 'block';
         document.getElementById('settingsBox').style.display = 'none';
-        loadCategories();
+        await testServerConnection(); // اختبار اتصال السيرفر أولاً
+        await loadCategories();
     }
 };
 
-// حفظ الإعدادات
-function saveSettings() {
-    const settings = {
-        serverUrl: document.getElementById('serverUrl').value,
-        username: document.getElementById('username').value,
-        password: document.getElementById('password').value
-    };
-    
-    localStorage.setItem('xtreamSettings', JSON.stringify(settings));
-    location.reload();
+// اختبار اتصال السيرفر
+async function testServerConnection() {
+    try {
+        const test = await fetch(
+            `${savedSettings.serverUrl}/player_api.php?` +
+            `username=${savedSettings.username}&` +
+            `password=${savedSettings.password}&` +
+            `action=get_live_categories`
+        );
+        
+        if (!test.ok) throw new Error('فشل الاتصال بالسيرفر');
+    } catch (error) {
+        console.error('خطأ الاتصال:', error);
+        alert('الاتصال بالسيرفر فشل! تأكد من البيانات أو حاول لاحقًا');
+        localStorage.removeItem('xtreamSettings');
+        location.reload();
+    }
 }
 
-// جلب البيانات من السيرفر
+// تشغيل المحتوى (الإصدار المعدل)
+async function playStream(streamUrl) {
+    try {
+        // تنظيف أي مثيل HLS سابق
+        if (currentHls) {
+            currentHls.destroy();
+            currentHls = null;
+        }
+
+        // التحقق من صحة الرابط
+        if (!isValidUrl(streamUrl)) {
+            throw new Error('رابط التشغيل غير صالح');
+        }
+
+        // إضافة طابع زمني لمنع التخزين المؤقت
+        const finalUrl = `${streamUrl}?t=${Date.now()}`;
+
+        if (Hls.isSupported()) {
+            currentHls = new Hls({
+                enableWorker: false,
+                xhrSetup: (xhr) => {
+                    xhr.withCredentials = true;
+                }
+            });
+            
+            currentHls.loadSource(finalUrl);
+            currentHls.attachMedia(player.tech().el);
+            
+            currentHls.on(Hls.Events.MANIFEST_PARSED, () => {
+                player.play();
+            });
+            
+            currentHls.on(Hls.Events.ERROR, (_, data) => {
+                console.error('HLS Error:', data);
+                handlePlayerError('HLS Error: ' + data.details);
+            });
+            
+        } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+            player.src({ src: finalUrl, type: 'application/x-mpegURL' });
+            player.play();
+        } else {
+            throw new Error('التنسيق غير مدعوم في هذا المتصفح');
+        }
+    } catch (error) {
+        handlePlayerError(error.message);
+    }
+}
+
+// التحقق من صحة الرابط
+function isValidUrl(url) {
+    try {
+        new URL(url);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+// معالجة الأخطاء (محدث)
+function handlePlayerError(message) {
+    const errorMap = {
+        'manifestLoadError': 'الرابط غير صالح أو منتهي الصلاحية',
+        'networkError': 'مشكلة في الشبكة أو السيرفر',
+        'mediaError': 'تنسيق الملف غير مدعوم'
+    };
+
+    const friendlyMessage = errorMap[message] || message;
+    
+    player.error({
+        code: 1003,
+        message: friendlyMessage
+    });
+    
+    alert(`خطأ التشغيل: ${friendlyMessage}`);
+    console.error('تفاصيل الخطأ:', message);
+}
+
+// تحديث دالة جلب البيانات
 async function fetchData(action, extraParams = '') {
     try {
         const response = await fetch(
             `${savedSettings.serverUrl}/player_api.php?` +
             `username=${savedSettings.username}&` +
             `password=${savedSettings.password}&` +
-            `action=${action}${extraParams}`
+            `action=${action}${extraParams}`,
+            {
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            }
         );
-        return await response.json();
-    } catch (error) {
-        console.error('خطأ في جلب البيانات:', error);
-        player.error({ code: 1001, message: 'خطأ في الاتصال بالسيرفر' });
-    }
-}
-
-// تحميل التصنيفات
-async function loadCategories() {
-    try {
-        const categories = await fetchData('get_live_categories');
-        const buttonsContainer = document.getElementById('categoryButtons');
         
-        buttonsContainer.innerHTML = categories.map(cat => `
-            <button class="category-btn" onclick="loadCategory('${cat.category_id}', 'live')">
-                ${cat.category_name}
-            </button>
-        `).join('');
+        if (!response.ok) throw new Error('استجابة غير صالحة من السيرفر');
         
-        buttonsContainer.innerHTML += `
-            <button class="category-btn" onclick="loadVodCategories()">الأفلام</button>
-            <button class="category-btn" onclick="loadSeriesCategories()">المسلسلات</button>
-        `;
+        const data = await response.json();
+        if (data.status === 'error') throw new Error(data.message);
+        
+        return data;
     } catch (error) {
-        console.error('خطأ في تحميل التصنيفات:', error);
+        handlePlayerError(error.message);
+        return [];
     }
 }
-
-// تشغيل المحتوى مع دعم HLS
-function playStream(streamUrl) {
-    if (Hls.isSupported()) {
-        const hls = new Hls();
-        hls.loadSource(streamUrl);
-        hls.attachMedia(player.tech().el);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => player.play());
-    } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-        player.src({ src: streamUrl, type: 'application/x-mpegURL' });
-        player.play();
-    } else {
-        player.error({ code: 1002, message: 'التنسيق غير مدعوم' });
-    }
-}
-
-// معالجة الأخطاء
-player.on('error', (error) => {
-    const errorMessages = {
-        1001: 'خطأ في الاتصال بالسيرفر',
-        1002: 'التنسيق غير مدعوم',
-        4: 'الرابط غير صالح'
-    };
-    
-    alert(`خطأ التشغيل: ${errorMessages[player.error().code] || 'خطأ غير معروف'}`);
-});
-
-// باقي الدوال (loadCategory, loadVodCategories, loadSeriesCategories, etc.) تبقى كما هي
-// [يمكنك إضافة الدوال الأخرى من الإجابات السابقة هنا]
