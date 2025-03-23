@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPTV Pro</title>
+    <link href="https://vjs.zencdn.net/7.11.4/video-js.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- المكتبات المطلوبة -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://vjs.zencdn.net/7.11.4/video.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-contrib-hls/5.15.0/videojs-contrib-hls.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- إعدادات الدخول -->
+        <div class="settings-box" id="settingsBox">
+            <h2>إعدادات Xtream Codes</h2>
+            <div class="form-group">
+                <label>رابط السيرفر:</label>
+                <input type="text" id="serverUrl" placeholder="https://example.com">
+            </div>
+            <div class="form-group">
+                <label>اسم المستخدم:</label>
+                <input type="text" id="username">
+            </div>
+            <div class="form-group">
+                <label>كلمة المرور:</label>
+                <input type="password" id="password">
+            </div>
+            <button onclick="saveSettings()" class="btn-save">حفظ الإعدادات</button>
+        </div>
+
+        <!-- الواجهة الرئيسية -->
+        <div class="content" id="mainContent" style="display: none;">
+            <h1>قائمة المحتوى</h1>
+            <div class="category-buttons" id="categoryButtons"></div>
+            <div class="items-list" id="itemsList"></div>
+            
+            <!-- مشغل الفيديو مع إعدادات HLS -->
+            <div class="player-container">
+                <video-js id="my-video" class="video-js vjs-default-skin" controls preload="auto">
+                    <source id="videoSource" type="application/x-mpegURL">
+                </video-js>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
